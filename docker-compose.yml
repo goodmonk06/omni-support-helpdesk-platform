@@ -17,6 +17,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - helpdesk-network
 
   redis:
     image: redis:7-alpine
@@ -30,7 +32,53 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - helpdesk-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: helpdesk-backend
+    environment:
+      DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/helpdesk?schema=public"
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      PORT: 3001
+      NODE_ENV: production
+      FRONTEND_URL: http://localhost:3000
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - helpdesk-network
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: helpdesk-frontend
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:3001
+      NEXT_PUBLIC_TENANT_ID: demo-tenant
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - helpdesk-network
+    restart: unless-stopped
 
 volumes:
   postgres_data:
   redis_data:
+
+networks:
+  helpdesk-network:
+    driver: bridge
