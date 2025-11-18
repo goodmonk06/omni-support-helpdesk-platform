@@ -11,30 +11,39 @@ datasource db {
 }
 
 model Tenant {
-  id        String   @id @default(uuid())
-  name      String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id               String   @id @default(uuid())
+  name             String
+  businessHours    Json?    // business hours configuration
+  timezone         String   @default("UTC")
+  settings         Json?    // custom tenant settings
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
-  inboxChannels InboxChannel[]
-  tickets       Ticket[]
-  agents        AgentUser[]
+  inboxChannels    InboxChannel[]
+  tickets          Ticket[]
+  agents           AgentUser[]
+  tags             Tag[]
+  cannedResponses  CannedResponse[]
+  automationRules  AutomationRule[]
+  slapolicies      SLAPolicy[]
 
   @@map("tenants")
 }
 
 model InboxChannel {
-  id                 String        @id @default(uuid())
-  tenantId           String
-  type               ChannelType
-  addressOrConfigJson String       // email address or JSON config for web_form/widget
-  name               String?       // friendly name
-  isActive           Boolean       @default(true)
-  createdAt          DateTime      @default(now())
-  updatedAt          DateTime      @updatedAt
+  id                  String      @id @default(uuid())
+  tenantId            String
+  type                ChannelType
+  addressOrConfigJson String      // email address or JSON config for web_form/widget
+  name                String?     // friendly name
+  isActive            Boolean     @default(true)
+  autoAssignEnabled   Boolean     @default(false)
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
 
-  tenant  Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  tickets Ticket[]
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tickets    Ticket[]
+  slapolicies SLAPolicy[]
 
   @@map("inbox_channels")
 }
@@ -46,24 +55,34 @@ enum ChannelType {
 }
 
 model Ticket {
-  id        String         @id @default(uuid())
-  tenantId  String
-  inboxId   String
-  subject   String
-  status    TicketStatus   @default(open)
-  priority  TicketPriority @default(medium)
-  assignedTo String?       // AgentUser id
-  createdAt DateTime       @default(now())
-  updatedAt DateTime       @updatedAt
+  id               String         @id @default(uuid())
+  tenantId         String
+  inboxId          String
+  subject          String
+  status           TicketStatus   @default(open)
+  priority         TicketPriority @default(medium)
+  assignedTo       String?        // AgentUser id
+  metadata         Json?          // custom ticket metadata
+  firstResponseAt  DateTime?      // when first agent reply was sent
+  resolvedAt       DateTime?      // when ticket was closed
+  customerEmail    String?        // primary customer email
+  customerName     String?        // primary customer name
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
 
-  tenant            Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  inboxChannel      InboxChannel      @relation(fields: [inboxId], references: [id], onDelete: Cascade)
-  assignedAgent     AgentUser?        @relation("AssignedTickets", fields: [assignedTo], references: [id], onDelete: SetNull)
-  messages          Message[]
-  suggestedReplies  SuggestedReply[]
+  tenant           Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  inboxChannel     InboxChannel      @relation(fields: [inboxId], references: [id], onDelete: Cascade)
+  assignedAgent    AgentUser?        @relation("AssignedTickets", fields: [assignedTo], references: [id], onDelete: SetNull)
+  messages         Message[]
+  suggestedReplies SuggestedReply[]
+  tags             TicketTag[]
+  notes            TicketNote[]
+  history          TicketHistory[]
 
   @@index([tenantId, status])
   @@index([assignedTo])
+  @@index([createdAt])
+  @@index([customerEmail])
   @@map("tickets")
 }
 
@@ -81,18 +100,21 @@ enum TicketPriority {
 }
 
 model Message {
-  id        String      @id @default(uuid())
-  ticketId  String
-  fromRole  MessageRole
-  fromEmail String?     // sender email if available
-  fromName  String?     // sender name if available
-  body      String      @db.Text
-  createdAt DateTime    @default(now())
+  id          String       @id @default(uuid())
+  ticketId    String
+  fromRole    MessageRole
+  fromEmail   String?      // sender email if available
+  fromName    String?      // sender name if available
+  body        String       @db.Text
+  sentiment   String?      // AI-detected sentiment: positive, neutral, negative
+  isInternal  Boolean      @default(false) // internal note vs customer-visible
+  createdAt   DateTime     @default(now())
 
   ticket           Ticket           @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   suggestedReplies SuggestedReply[]
 
   @@index([ticketId])
+  @@index([createdAt])
   @@map("messages")
 }
 
@@ -108,12 +130,17 @@ model AgentUser {
   email     String
   name      String
   role      AgentRole @default(agent)
+  signature String?   // email signature for replies
+  avatar    String?   // avatar URL
   isActive  Boolean   @default(true)
+  maxActiveTickets Int @default(50) // workload limit
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
-  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  assignedTickets Ticket[] @relation("AssignedTickets")
+  tenant          Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  assignedTickets Ticket[]       @relation("AssignedTickets")
+  ticketNotes     TicketNote[]
+  ticketHistory   TicketHistory[]
 
   @@unique([tenantId, email])
   @@map("agent_users")
@@ -130,6 +157,7 @@ model SuggestedReply {
   messageId      String?  // the message we're replying to (optional)
   model          String   // e.g., "gpt-4", "gpt-3.5-turbo"
   suggestionText String   @db.Text
+  used           Boolean  @default(false) // was this suggestion used?
   createdAt      DateTime @default(now())
 
   ticket  Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
@@ -137,4 +165,123 @@ model SuggestedReply {
 
   @@index([ticketId])
   @@map("suggested_replies")
+}
+
+// New entities for Phase 3
+
+model Tag {
+  id          String   @id @default(uuid())
+  tenantId    String
+  name        String   // e.g., "bug", "feature-request", "billing"
+  color       String   @default("#6366f1") // hex color for UI
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant  Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tickets TicketTag[]
+
+  @@unique([tenantId, name])
+  @@map("tags")
+}
+
+model TicketTag {
+  id        String   @id @default(uuid())
+  ticketId  String
+  tagId     String
+  createdAt DateTime @default(now())
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  tag    Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([ticketId, tagId])
+  @@map("ticket_tags")
+}
+
+model CannedResponse {
+  id        String   @id @default(uuid())
+  tenantId  String
+  name      String   // short identifier
+  title     String   // display title
+  content   String   @db.Text // template with variables like {{customerName}}
+  shortcuts String[] // keyboard shortcuts
+  category  String?  // grouping
+  isActive  Boolean  @default(true)
+  usageCount Int     @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, name])
+  @@map("canned_responses")
+}
+
+model TicketNote {
+  id        String   @id @default(uuid())
+  ticketId  String
+  agentId   String
+  content   String   @db.Text
+  createdAt DateTime @default(now())
+
+  ticket Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  agent  AgentUser @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
+  @@map("ticket_notes")
+}
+
+model TicketHistory {
+  id          String   @id @default(uuid())
+  ticketId    String
+  agentId     String?  // null if system-generated
+  action      String   // e.g., "status_changed", "priority_changed", "assigned"
+  fieldName   String?  // field that changed
+  oldValue    String?
+  newValue    String?
+  description String?  // human-readable description
+  createdAt   DateTime @default(now())
+
+  ticket Ticket     @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  agent  AgentUser? @relation(fields: [agentId], references: [id], onDelete: SetNull)
+
+  @@index([ticketId])
+  @@index([createdAt])
+  @@map("ticket_history")
+}
+
+model AutomationRule {
+  id          String   @id @default(uuid())
+  tenantId    String
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  conditions  Json     // condition logic
+  actions     Json     // actions to perform
+  priority    Int      @default(0) // execution order
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("automation_rules")
+}
+
+model SLAPolicy {
+  id                    String   @id @default(uuid())
+  tenantId              String
+  name                  String
+  description           String?
+  channelId             String?  // apply to specific channel
+  priority              TicketPriority?
+  firstResponseMinutes  Int?     // target time for first response
+  resolutionMinutes     Int?     // target time for resolution
+  isActive              Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  tenant  Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  channel InboxChannel? @relation(fields: [channelId], references: [id], onDelete: SetNull)
+
+  @@map("sla_policies")
 }

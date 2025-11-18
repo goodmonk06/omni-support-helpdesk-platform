@@ -8,6 +8,8 @@ import { AgentsModule } from './agents/agents.module';
 import { ChannelsModule } from './channels/channels.module';
 import { SuggestionsModule } from './suggestions/suggestions.module';
 import { EmailQueueModule } from './email-queue/email-queue.module';
+import { CannedResponsesModule } from './canned-responses/canned-responses.module';
+import { TagsModule } from './tags/tags.module';
 
 @Module({
   imports: [
@@ -27,6 +29,8 @@ import { EmailQueueModule } from './email-queue/email-queue.module';
     ChannelsModule,
     SuggestionsModule,
     EmailQueueModule,
+    CannedResponsesModule,
+    TagsModule,
   ],
 })
 export class AppModule {}
