@@ -1,0 +1,29 @@
+{
+  "name": "omni-support-helpdesk-platform",
+  "version": "1.0.0",
+  "description": "Omni-channel support helpdesk platform with email, contact forms, and chat widget support",
+  "private": true,
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "backend": "npm run start --workspace=backend",
+    "frontend": "npm run dev --workspace=frontend",
+    "dev": "concurrently \"npm run backend\" \"npm run frontend\"",
+    "build": "npm run build --workspaces",
+    "prisma:generate": "npm run prisma:generate --workspace=backend",
+    "prisma:migrate": "npm run prisma:migrate --workspace=backend"
+  },
+  "keywords": [
+    "helpdesk",
+    "support",
+    "omni-channel",
+    "ticketing"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

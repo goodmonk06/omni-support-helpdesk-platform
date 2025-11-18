@@ -1,0 +1,140 @@
+// This is your Prisma schema file
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Tenant {
+  id        String   @id @default(uuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  inboxChannels InboxChannel[]
+  tickets       Ticket[]
+  agents        AgentUser[]
+
+  @@map("tenants")
+}
+
+model InboxChannel {
+  id                 String        @id @default(uuid())
+  tenantId           String
+  type               ChannelType
+  addressOrConfigJson String       // email address or JSON config for web_form/widget
+  name               String?       // friendly name
+  isActive           Boolean       @default(true)
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  tenant  Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tickets Ticket[]
+
+  @@map("inbox_channels")
+}
+
+enum ChannelType {
+  email
+  web_form
+  widget
+}
+
+model Ticket {
+  id        String         @id @default(uuid())
+  tenantId  String
+  inboxId   String
+  subject   String
+  status    TicketStatus   @default(open)
+  priority  TicketPriority @default(medium)
+  assignedTo String?       // AgentUser id
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  tenant            Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  inboxChannel      InboxChannel      @relation(fields: [inboxId], references: [id], onDelete: Cascade)
+  assignedAgent     AgentUser?        @relation("AssignedTickets", fields: [assignedTo], references: [id], onDelete: SetNull)
+  messages          Message[]
+  suggestedReplies  SuggestedReply[]
+
+  @@index([tenantId, status])
+  @@index([assignedTo])
+  @@map("tickets")
+}
+
+enum TicketStatus {
+  open
+  pending
+  closed
+}
+
+enum TicketPriority {
+  low
+  medium
+  high
+  urgent
+}
+
+model Message {
+  id        String      @id @default(uuid())
+  ticketId  String
+  fromRole  MessageRole
+  fromEmail String?     // sender email if available
+  fromName  String?     // sender name if available
+  body      String      @db.Text
+  createdAt DateTime    @default(now())
+
+  ticket           Ticket           @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  suggestedReplies SuggestedReply[]
+
+  @@index([ticketId])
+  @@map("messages")
+}
+
+enum MessageRole {
+  user    // customer/end-user
+  agent   // support agent
+  system  // automated system message
+}
+
+model AgentUser {
+  id        String    @id @default(uuid())
+  tenantId  String
+  email     String
+  name      String
+  role      AgentRole @default(agent)
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  assignedTickets Ticket[] @relation("AssignedTickets")
+
+  @@unique([tenantId, email])
+  @@map("agent_users")
+}
+
+enum AgentRole {
+  admin
+  agent
+}
+
+model SuggestedReply {
+  id             String   @id @default(uuid())
+  ticketId       String
+  messageId      String?  // the message we're replying to (optional)
+  model          String   // e.g., "gpt-4", "gpt-3.5-turbo"
+  suggestionText String   @db.Text
+  createdAt      DateTime @default(now())
+
+  ticket  Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  message Message? @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
+  @@map("suggested_replies")
+}
